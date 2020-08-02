@@ -1,0 +1,600 @@
+<!DOCTYPE HTML>
+<html>
+	<head>
+	<meta charset="utf-8">
+	<style>
+		html, body {
+			padding: 0;
+			margin: 0;
+			overflow: hidden;
+		}
+		img {
+			display: none;
+		}
+	</style>
+	</head>
+	<body>
+	<canvas id="Canvas"></canvas>
+	<img id="HeroBulletSprite" src="heroBullet.png">
+	<img id="EnemyBulletSprite" src="enemyBullet.png">
+	<img id="HeroSprite" src="Hero.svg">
+	<img id="CoreSprite" src="core.png">
+	<img id="Enemy1Sprite" src="enemy1.png">
+	<img id="Enemy2Sprite" src="enemy2.png">
+	<img id="BackgroundSprite" src="background.svg">
+	<script>
+	let Canvas = document.getElementById("Canvas");
+	let context = Canvas.getContext("2d");
+	let collisionCanvas = document.createElement("canvas");
+	let collisionContext = collisionCanvas.getContext("2d");
+	let HeroBulletSprite = document.getElementById("HeroBulletSprite");
+	let enemyBulletSprite = document.getElementById("enemyBulletSprite");
+	let HeroSprite = document.getElementById("HeroSprite");
+	let CoreSprite = document.getElementById("CoreSprite");
+	let Enemy1Sprite = document.getElementById("Enemy1Sprite");
+	let Enemy2Sprite = document.getElementById("Enemy2Sprite");
+	let BackgroundSprite = document.getElementById("BackgroundSprite");
+	let machines;
+	let bullets;
+	let hero;
+
+	let alert;
+	let time;
+	let preTime;
+
+	let score;
+	let paused;
+	let menu;
+	let wave;
+	let waveFlag;
+
+	let preDebugMode = false;
+	let debugMode = false;
+
+	const waveTime = [0, 50000, 100000];
+	let laserWidth = 250;
+	let defaultLaserWidth = 250;
+
+	let controller = {
+		right: false,
+		left: false,
+		up: false,
+		down: false,
+		space: false,
+		keyD: false
+	};
+
+	function windowResized() {
+		Canvas.width = window.innerWidth;
+		Canvas.height = window.innerHeight;
+		collisionCanvas.width = Canvas.width;
+		collisionCanvas.height = Canvas.height;
+		if(menu) startMenu();
+		if(paused) {
+			if(hero.life <= 0) {
+				drawGameover();
+			} else {
+				drawPaused();
+			}
+		}
+	}
+
+	window.onload = function() {
+		windowResized();
+		collisionContext.fillStyle = "#FFFFFF";
+		window.onresize = windowResized;
+		startMenu();
+	};
+
+	function startMenu() {
+		context.fillStyle = "#2C2B3A";
+		context.fillRect(0, 0, Canvas.width, Canvas.height);
+		context.fillStyle = "#FFFFFF";
+		context.textAlign = "center";
+		context.font = "900 100px sans-serif";
+		context.fillText("SPACE SHOOTER", Canvas.width / 2, 250);
+		context.font = "800 50px sans-serif";
+		context.fillText("Press any button.", Canvas.width / 2, 500);
+		context.drawImage(HeroSprite, Canvas.width / 2 - 50, Canvas.height / 1.612 - 50);
+		menu = true;
+	}
+
+	function init() {
+		machines = [];
+		bullets = [];
+		alert = null;
+		score = 0;
+		hero = {
+			type: 0,
+			position: {
+				x: Math.round(Canvas.width / 2),
+				y: Math.round(Canvas.height / 1.612)
+			},
+			initialLife: 10,
+			life: 10,
+			lifeLessTime: null,
+			destroymode: 0,
+			destroymodeTime: null
+		};
+		alert = "";
+		time = 0;
+		preTime = new Date();
+		paused = false;
+		menu = false;
+		wave = 0;
+		laserWidth = defaultLaserWidth;
+		machines.push(hero);
+		context.strokeStyle = "#FFFFFF";
+		render();
+	}
+
+	window.onkeydown = function(e) {
+		switch(e.code) {
+			case "ArrowRight":
+				controller.right = true;
+				break;
+			case "ArrowLeft":
+				controller.left = true;
+				break;
+			case "ArrowUp":
+				controller.up = true;
+				break;
+			case "ArrowDown":
+				controller.down = true;
+				break;
+			case "Space":
+				controller.space = true;
+				if(!menu) {
+					if(hero.life == hero.initialLife) {
+						radioShoot(hero.position.x, hero.position.y, 0, 8);
+					} else {
+						shoot(hero.position.x, hero.position.y, 0, 0);
+					}
+				}
+				break;
+			case "Escape":
+				if(menu) break;
+				if(paused && hero.life > 0) {
+					paused = false;
+					preTime = new Date();
+					render();
+				} else {
+					paused = true;
+				}
+				break;
+			case "KeyR":
+				if(paused) init();
+				break;
+			case "KeyD":
+				controller.keyD = true;
+				break;
+		}
+		if(menu) init();
+	}
+
+	window.onkeyup = function(e) {
+		switch(e.code) {
+			case "ArrowRight":
+				controller.right = false;
+				break;
+			case "ArrowLeft":
+				controller.left = false;
+				break;
+			case "ArrowUp":
+				controller.up = false;
+				break;
+			case "ArrowDown":
+				controller.down = false;
+				break;
+			case "Space":
+				controller.space = false;
+				break;
+			case "KeyD":
+				controller.keyD = false;
+				break;
+		}
+	}
+
+	function spawnEnemy(x, y, type) {
+		if(machines.length > 11) return;
+		let enemy = {
+			type: 1 + type,
+			position: {
+				x: x,
+				y: y
+			},
+			time: time,
+			shoot: 0,
+			dropped: false,
+			initialLife: null,
+			life: null
+		};
+		switch(type) {
+			case 0:
+				enemy.initialLife = 1;
+				enemy.life = 1;
+				break;
+			case 1:
+			enemy.initialLife = 3;
+			enemy.life = 3;
+		}
+		machines.push(enemy);
+	}
+
+	function shoot(x, y, type, angle, bonus, delay) {
+		let bullet = {
+			type: type,
+			position: {
+				x: x,
+				y: y
+			},
+			angle: angle,
+			bonus: bonus,
+			time: time,
+			warned: false,
+			delay: delay ? delay : 0,
+			loaded: false
+		};
+		bullets.push(bullet);
+	}
+
+	function radioShoot(x, y, type, num, bonus) {
+		for(let angle = 0;angle < 2 * Math.PI;angle += 2 * Math.PI / num) {
+			shoot(x, y, type, angle, bonus);
+		}
+	}
+
+	function showAlert(message, type) {
+		type = type ? type : 0;
+		alert = {
+			message: message,
+			time: time,
+			type: type ? type : 0,
+			maxTime: null
+		};
+		switch(type) {
+			case 0:
+			 alert.maxTime = 3000;
+			 break;
+			case 1:
+ 			 alert.maxTime = 4000;
+ 			 break;
+		}
+	}
+
+	function render() {
+		collisionContext.clearRect(0, 0, collisionCanvas.width, collisionCanvas.height);
+		context.fillStyle = "#2C2B3A";
+		context.fillRect(0, 0, Canvas.width, Canvas.height);
+		context.drawImage(BackgroundSprite, Canvas.width / 2 - 390, Canvas.height / 2 - 240 + time * 0.01);
+
+		for(const num in bullets) {
+			let bullet = bullets[num];
+			let position = bullet.position;
+			let lifetime = time - bullet.time - bullet.delay;
+			if(lifetime < 0) continue;
+			context.save()
+			context.translate(position.x, position.y);
+			context.rotate(bullet.angle);
+			collisionContext.save()
+			collisionContext.translate(position.x, position.y);
+			collisionContext.rotate(bullet.angle);
+			switch(bullet.type) {
+				case 0:
+					context.drawImage(HeroBulletSprite, -4, - 12.5, 8, 25);
+					for(const n in machines) {
+						let enemy = machines[n];
+						if(enemy.type == 0) continue;
+						if(enemy.dropped) continue;
+						let distance = Math.sqrt((position.x - enemy.position.x) ** 2 + (position.y - enemy.position.y) ** 2)
+						if(distance <= 50) {
+							enemy.life -= 1;
+							bullets.splice(num, 1);
+							if(enemy.life <= 0) {
+								score += enemy.initialLife;
+								radioShoot(enemy.position.x, enemy.position.y, 0, enemy.initialLife * 5, true);
+								if(Math.random() < 0.25) {
+									enemy.dropped = true;
+								} else {
+									machines.splice(n, 1);
+								}
+							}
+						}
+					}
+					break;
+				case 1:
+					let distance = Math.sqrt((position.x - hero.position.x) ** 2 + (position.y - hero.position.y) ** 2)
+					if(distance <= 30) {
+						if(!hero.destroymodeTime) hero.life -= 1;
+						bullets.splice(num, 1);
+					} else {
+						context.drawImage(EnemyBulletSprite, -4, -12.5, 8, 25);
+					}
+					break;
+				case 2:
+					let ratio = Math.sin(lifetime / 250);
+					let width;
+					let length = Math.sqrt(Canvas.width ** 2 + Canvas.height ** 2);
+					if(!bullet.warned) {
+						showAlert("WARNING", 1);
+						bullet.warned = true;
+					}
+					if(lifetime >= 1000 && lifetime < 1250) {
+						width = laserWidth * (lifetime - 1000) / 250;
+					} else {
+						if(lifetime >= 4750) {
+							width = laserWidth * (1 - (lifetime - 4750) / 250);
+						} else {
+							width = laserWidth * 0.9 + laserWidth * 0.1 * ratio;
+						}
+					}
+					if(lifetime < 1000) {
+						context.fillStyle = "rgba(" + Math.round(169 + 25 * ratio) + ", " + Math.round(26 + 25 * ratio) + ", " + Math.round(26 + 25 * ratio) + ", 0.75)";
+					} else {
+						context.fillStyle = "rgba(" + Math.round(200 + 55 * ratio) + ", " + 255 + ", " + 255 + ")";
+						collisionContext.fillRect(- width / 2, 0, width, length);
+					}
+					context.fillRect(- width / 2, 0, width, length);
+					break;
+			}
+			collisionContext.restore();
+			context.restore();
+			if(bullet.type <= 1) {
+				position.x += Math.sin(bullet.angle) * 10;
+				position.y -= Math.cos(bullet.angle) * 10;
+			}
+			if(lifetime >= 5000) bullets.splice(num, 1);
+		}
+
+		for(const num in machines) {
+			let machine = machines[num];
+			let position = machine.position;
+
+			if(machine.type == 0) {
+				if(controller.right) position.x += 5;
+				if(controller.left) position.x -= 5;
+				if(controller.up) position.y -= 5;
+				if(controller.down) position.y += 5;
+
+				if(position.x < 0) position.x = 0;
+				if(position.x > Canvas.width) position.x = Canvas.width;
+				if(position.y < 0) position.y = 0;
+				if(position.y > Canvas.height) position.y = Canvas.height;
+				context.drawImage(HeroSprite, position.x - 50, position.y - 50);
+			} else {
+				let lifetime = time - machine.time;
+				if(machine.dropped) {
+					let distance = Math.sqrt((position.x - hero.position.x) ** 2 + (position.y - hero.position.y) ** 2);
+					if(distance < 50) {
+						if(hero.life < hero.initialLife) {
+							hero.life += 2;
+							if(hero.life > hero.initialLife) hero.life = hero.initialLife;
+						} else {
+							score += 1;
+						}
+						machines.splice(num, 1);
+					} else {
+						context.drawImage(CoreSprite, position.x - 31, position.y - 31, 62, 62);
+					}
+				} else {
+					switch(machine.type) {
+						case 1:
+							context.drawImage(Enemy1Sprite, position.x - 50, position.y - 50, 100, 100);
+							if(lifetime > 1000 * machine.shoot) {
+								radioShoot(position.x, position.y, 1, 10);
+								machine.shoot += 1;
+							}
+							position.x += Math.sin(position.y / 10) * 3;
+						break;
+						case 2:
+							context.drawImage(Enemy2Sprite, position.x - 75, position.y - 75, 150, 150);
+							if(lifetime > 1000 * machine.shoot) {
+								radioShoot(position.x, position.y, 1, 10);
+								machine.shoot += 1;
+							} else {
+								if(lifetime > 500 * machine.shoot) {
+									radioShoot(position.x, position.y, 1, 5);
+									machine.shoot += 1;
+								}
+							}
+							position.x += Math.sign(hero.position.x - position.x) * 3;
+						break;
+					}
+				}
+				position.y += 4 * (Math.random() ** 2);
+				if(position.y > Canvas.height + 50) machines.splice(num, 1);
+			}
+			if(!machine.dropped) {
+				context.fillStyle = "#000000";
+				context.fillRect(position.x - 31, position.y + 50 + 10, 62, 9);
+				context.fillStyle = "#B02923";
+				context.fillRect(position.x - 31, position.y + 50 + 10, 62 * machine.life / machine.initialLife, 9);
+			}
+		}
+		if(alert) {
+			let lifetime = time - alert.time;
+			if(lifetime > alert.maxTime) {
+				alert = null;
+			} else {
+				let fadeOutRatio = (1 - (lifetime - (alert.maxTime - 1000)) / 1000) * 0.75;
+				fadeOutRatio = fadeOutRatio > 0.75 ? 0.75 : fadeOutRatio;
+				switch(alert.type) {
+					case 0:
+						context.fillStyle = "rgba(69, 26, 26, " + fadeOutRatio + ")";
+						break;
+					case 1:
+						let ratio = (Math.sin(lifetime / 200) + 1) / 2;
+						context.fillStyle = "rgba(" + Math.round(169 + 25 * ratio) + ", " + Math.round(26 + 25 * ratio) + ", " + Math.round(26 + 25 * ratio) + ", " + fadeOutRatio + ")";
+						break;
+				}
+				if(lifetime < 250) {
+					let width = Canvas.width * ((lifetime / 250) ** 2);
+					context.fillRect(Canvas.width - width, 175, width, 150);
+				} else {
+					context.fillRect(0, 175, Canvas.width, 150);
+				}
+				context.fillStyle = "rgba(255, 255, 255, " + fadeOutRatio + ")";
+				context.textAlign = "center";
+				context.font = "900 50px sans-serif";
+				context.fillText(alert.message, Canvas.width / 2, 216 + 50);
+			}
+		}
+
+		const _randomSpawn = function(type, waveN) {
+			let lifetime = time - waveTime[waveN];
+			if(time >= 5000 * waveFlag + waveTime[waveN]) {
+				if(waveFlag != 0 && Math.random() < 0.75) {
+					shoot(hero.position.x, 0, 2, 0);
+					return;
+				}
+				for(let num = 0;num < 10 * lifetime / (waveTime[waveN + 1] - waveTime[waveN]);num += 1) {
+					let x;
+					do {
+						x = 100 + (Canvas.width - 200) * Math.random();
+					} while(Math.abs(machines[machines.length - 1].position.x - x) < 250);
+					spawnEnemy(x, -100, type);
+				}
+				waveFlag += 1;
+			}
+		}
+
+		if(debugMode) {
+			if(!preDebugMode) {
+				machines = [hero];
+				bullets = [];
+				score = 0;
+				hero.life = hero.initialLife;
+				time = 0;
+
+				showAlert("DEBUG MODE ENABLED.");
+				preDebugMode = true;
+			}
+		} else {
+			if(preDebugMode) {
+				showAlert("DEBUG MODE DISENABLED.");
+				preDebugMode = false;
+			}
+			if(time >= waveTime[0] && wave < 1) {
+				showAlert("WAVE 1");
+				wave = 1;
+				waveFlag = 0;
+			} else {
+				if(time >= waveTime[1] && wave < 2) {
+					showAlert("WAVE 2");
+					wave = 2;
+					waveFlag = 0;
+					laserWidth *= 1.25;
+				}
+			}
+			switch(wave) {
+				case 1:
+					_randomSpawn(0, 0);
+					break;
+				case 2:
+					_randomSpawn(1, 1);
+					break;
+			}
+		}
+
+		const collisionPixels = collisionContext.getImageData(0, 0, collisionCanvas.width, collisionCanvas.height);
+		if(collisionPixels.data[hero.position.y * collisionPixels.width * 4 + hero.position.x * 4] == 255) {
+			hero.life = 0;
+		}
+
+		if(hero.destroymodeTime) {
+			let lifetime = time - hero.destroymodeTime;
+			if(lifetime >= 10 * hero.destroymode) {
+				shoot(hero.position.x, hero.position.y, 0, Math.PI / 25 * hero.destroymode);
+				hero.destroymode += 1;
+			}
+			if(lifetime > 3000) {
+				hero.destroymode = 0;
+				hero.destroymodeTime = null;
+			}
+		} else {
+			if(hero.life < 5) {
+				if(!hero.lifeLessTime) {
+					hero.lifeLessTime = time;
+				} else {
+					if(time - hero.lifeLessTime > 1500 && hero.destroymode == 0) {
+						showAlert("DESTROYMODE AVAILABLE. [D]");
+						hero.destroymode = 1;
+					} else {
+						if(hero.destroymode == 1 && controller.keyD) {
+							hero.destroymode = 0;
+							hero.destroymodeTime = time;
+							hero.lifeLessTime = null;
+							showAlert("DESTROYMODE", 1);
+						}
+					}
+				}
+			} else {
+				hero.lifeLessTime = null;
+			}
+		}
+
+		context.drawImage(CoreSprite, 25, 25, 100, 100);
+
+
+		context.fillStyle = "#FFFFFF";
+		context.font = "15px sans-serif";
+		context.textAlign = "center";
+		context.fillText("esc: pause, space: shoot, ↑↓→←: move", Canvas.width / 2, Canvas.height - 10);
+		context.font = "62px sans-serif";
+		context.textAlign = "left";
+		context.fillText(score, 125, 95);
+
+		if(paused) {
+			drawPaused();
+		} else {
+			if(hero.life <= 0) {
+				if(debugMode) {
+					showAlert("YOU DIED.");
+					hero.life = hero.initialLife;
+					machines = [hero];
+					bullets = [];
+					time = 0;
+					window.requestAnimationFrame(render);
+				} else {
+					drawGameover();
+					paused = true;
+				}
+			} else {
+				window.requestAnimationFrame(render);
+			}
+		}
+		let current = new Date();
+		time += current - preTime;
+		preTime = current;
+	}
+
+	function drawPaused() {
+		context.fillStyle = "rgba(0, 0, 0, 0.5)";
+		context.fillRect(0, 0, Canvas.width, Canvas.height);
+		context.fillStyle = "#FFFFFF";
+		context.textAlign = "center";
+		context.font = "900 100px sans-serif";
+		context.fillText("PAUSED", Canvas.width / 2, 250);
+		context.font = "800 50px sans-serif";
+		context.fillText("Press esc to resume.", Canvas.width / 2, 500);
+		context.font = "700 25px sans-serif";
+		context.fillText("Press R to retry.", Canvas.width / 2, 550);
+	}
+
+	function drawGameover() {
+		context.fillStyle = "rgba(0, 0, 0, 0.5)";
+		context.fillRect(0, 0, Canvas.width, Canvas.height);
+		context.fillStyle = "#FFFFFF";
+		context.textAlign = "center";
+		context.font = "900 100px sans-serif";
+		context.fillText("GAME OVER", Canvas.width / 2, 250);
+		context.font = "800 50px sans-serif";
+		context.fillText("Press R to retry.", Canvas.width / 2, 500);
+	}
+
+	function toggleDebugMode() {
+		debugMode = !debugMode;
+	}
+	</script>
+	</body>
+</html>
